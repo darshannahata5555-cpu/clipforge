@@ -98,7 +98,7 @@ services:
       - key: NEXT_PUBLIC_API_URL
         value: https://clipforge-backend.onrender.com/api
 
-type: keyvalue
+  - type: keyvalue
     name: clipforge-redis
     plan: starter
     ipAllowList:
