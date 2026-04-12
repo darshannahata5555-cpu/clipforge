@@ -1,0 +1,40 @@
+version: "3.9"
+
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+# This overrides production config for local development.
+
+services:
+  traefik:
+    profiles: ["production-only"]
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://100.129.165.51:8000/api
+    labels: []
+    volumes:
+      - ./frontend:/app
+      - frontend_modules:/app/node_modules # named volume keeps image node_modules intact
+
+  backend:
+    ports:
+      - "8000:8000"
+    labels: []
+    environment:
+      - STORAGE_TYPE=local
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+
+volumes:
+  frontend_modules:
