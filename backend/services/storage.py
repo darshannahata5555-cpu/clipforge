@@ -75,9 +75,58 @@ class R2Storage:
         self.client.delete_object(Bucket=self.bucket, Key=key)
 
 
+class S3Storage:
+    def __init__(self):
+        self.client = boto3.client(
+            "s3",
+            region_name=settings.aws_region or "us-east-1",
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+        )
+        self.bucket = settings.aws_s3_bucket
+        self.public_url_base = (
+            settings.aws_s3_public_url.rstrip("/")
+            if settings.aws_s3_public_url
+            else self._default_public_url()
+        )
+
+    def _default_public_url(self) -> str:
+        if not settings.aws_region or settings.aws_region == "us-east-1":
+            return f"https://{self.bucket}.s3.amazonaws.com"
+        return f"https://{self.bucket}.s3.{settings.aws_region}.amazonaws.com"
+
+    async def save(self, key: str, data: bytes) -> str:
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=data)
+        return key
+
+    def save_sync(self, key: str, data: bytes) -> str:
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=data)
+        return key
+
+    def local_path(self, key: str) -> str:
+        raise RuntimeError("S3Storage has no local_path. Use download_to_tmp().")
+
+    def download_to_tmp(self, key: str, tmp_path: str) -> str:
+        self.client.download_file(self.bucket, key, tmp_path)
+        return tmp_path
+
+    def upload_file(self, key: str, file_path: str) -> str:
+        with open(file_path, "rb") as f:
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=f)
+        return key
+
+    def public_url(self, key: str) -> str:
+        return f"{self.public_url_base}/{key}"
+
+    def delete(self, key: str):
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+
 def _make_storage():
     if settings.storage_type == "r2":
         return R2Storage()
+    if settings.storage_type == "s3":
+        return S3Storage()
     return LocalStorage(settings.local_storage_path)
 
 

@@ -83,6 +83,21 @@ R2_BUCKET=video-pipeline
 R2_PUBLIC_URL=https://pub-xxx.r2.dev
 ```
 
+## AWS deployment with S3 storage
+
+If you deploy on AWS, use S3 for file storage by setting:
+
+```
+STORAGE_TYPE=s3
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret
+AWS_S3_BUCKET=video-pipeline
+AWS_REGION=us-east-1
+AWS_S3_PUBLIC_URL=https://video-pipeline.s3.amazonaws.com
+```
+
+`AWS_S3_PUBLIC_URL` is optional when your bucket is publicly accessible.
+
 ## Pipeline
 
 ```

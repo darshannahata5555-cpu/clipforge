@@ -15,13 +15,22 @@ class Settings(BaseSettings):
     shotstack_env: str = "stage"   # "stage" or "v1" (production)
 
     # Storage
-    storage_type: str = "local"          # "local" or "r2"
+    storage_type: str = "local"          # "local", "r2", or "s3"
     local_storage_path: str = "/app/storage"
+
+    # Cloudflare R2
     r2_account_id: str = ""
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
     r2_bucket: str = ""
     r2_public_url: str = ""              # e.g. https://pub-xxx.r2.dev
+
+    # AWS S3
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_s3_bucket: str = ""
+    aws_region: str = "us-east-1"
+    aws_s3_public_url: str = ""          # e.g. https://my-bucket.s3.amazonaws.com
 
     # App limits
     max_file_size_mb: int = 500

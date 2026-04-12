@@ -97,7 +97,7 @@ def process_video(self, job_id: str):
         _update(db, job, step_label="Cutting & stitching clips…", progress=75)
 
         shorts_out    = []
-        use_shotstack = bool(settings.shotstack_api_key) and settings.storage_type == "r2"
+        use_shotstack = bool(settings.shotstack_api_key) and settings.storage_type in {"r2", "s3"}
 
         for i, design in enumerate(designs):
             short_id  = str(uuid.uuid4())[:8]
