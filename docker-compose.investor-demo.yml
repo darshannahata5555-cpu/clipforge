@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  traefik:
+    profiles: ["production-only"]
+
+  frontend:
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=/api
+      - INTERNAL_API_URL=http://backend:8000
+
+  backend:
+    volumes:
+      - ./storage:/app/storage
+
+  worker:
+    volumes:
+      - ./storage:/app/storage
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://frontend:3000
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    networks:
+      - web

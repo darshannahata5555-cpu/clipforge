@@ -21,6 +21,40 @@ Required keys in `.env`:
 - `ASSEMBLYAI_API_KEY` — transcription (free tier: 100 hours)
 - `POSTGRES_PASSWORD` — any string (local only)
 
+## Investor demo (easiest)
+
+Use the built-in Cloudflare Quick Tunnel flow if you just need a temporary public demo link.
+
+Prerequisites:
+
+- Docker Desktop is running
+- `.env` contains `ANTHROPIC_API_KEY`
+- `.env` contains `ASSEMBLYAI_API_KEY`
+
+Start the demo:
+
+```powershell
+.\scripts\start-investor-demo.ps1
+```
+
+The script will:
+
+- start the full app stack
+- start a temporary Cloudflare tunnel
+- stream the `cloudflared` logs until the public `https://...trycloudflare.com` URL appears
+
+Stop the demo:
+
+```powershell
+.\scripts\stop-investor-demo.ps1
+```
+
+Notes:
+
+- The tunnel URL changes every time you restart the demo.
+- This is for short-lived demos only, not production hosting.
+- The frontend now uses same-origin `/api` requests, so only the frontend needs to be exposed publicly for the investor demo.
+
 ## Deploy to a VPS (production)
 
 ```bash

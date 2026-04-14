@@ -80,7 +80,9 @@ def concat_segments(
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0",
             "-i", concat_list,
-            "-c", "copy",
+            # Re-encode the final concat to avoid MP4 concat compatibility issues.
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "192k",
             output_path,
         ]
         subprocess.run(cmd, check=True, capture_output=True)

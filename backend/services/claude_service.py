@@ -1,10 +1,14 @@
+import importlib
 import json
+from pathlib import Path
 import re
 import anthropic
 from config import settings
 
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = "claude-sonnet-4-20250514"
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+LINKEDIN_SKILL = (PROMPTS_DIR / "sst_linkedin_skill.md").read_text(encoding="utf-8")
 
 # ── Scaler brand context injected into every prompt ──────────────────────────
 SCALER_CONTEXT = """
@@ -23,38 +27,129 @@ TONE & VOICE:
 POSTING STYLE:
 - Posts are published by Scaler (not the speaker themselves)
 - Credit the speaker naturally ("In our latest podcast, [Speaker Name] shared...")
+- Write from Scaler's point of view and with a subtle brand-building / audience-growth intent
 - End Twitter threads / LinkedIn posts with a soft CTA pointing to Scaler
-  (e.g. "Full podcast on our YouTube channel 🔗" or "This is why we built Scaler.")
+  (e.g. "Watch the full podcast on Scaler's YouTube channel." or "This is exactly why Scaler builds for ambitious tech talent.")
 - Use relevant hashtags: #Scaler #TechCareers #StartupIndia #BuildInPublic etc.
 """
 
 
-def _chat(prompt: str, max_tokens: int = 4096) -> str:
-    msg = client.messages.create(
-        model=MODEL,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}],
-    )
+def _chat(
+    prompt: str,
+    max_tokens: int = 4096,
+    *,
+    system: str | None = None,
+    model: str = MODEL,
+) -> str:
+    kwargs = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if system:
+        kwargs["system"] = system
+    msg = client.messages.create(**kwargs)
     return msg.content[0].text
+
+
+def _clean_json_text(text: str) -> str:
+    clean = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
+    clean = clean.replace("“", '"').replace("”", '"')
+    clean = clean.replace("‘", "'").replace("’", "'")
+    clean = clean.replace("\r\n", "\n")
+    # Remove trailing commas before closing arrays/objects.
+    clean = re.sub(r",\s*([\]}])", r"\1", clean)
+    # Normalize repeated whitespace and remove leading/trailing spaces on each line.
+    clean = "\n".join(line.strip() for line in clean.splitlines() if line.strip())
+    return clean
+
+
+def _normalize_json_like(text: str) -> str:
+    """Make common non-standard JSON output more parseable."""
+    normalized = text
+    # Quote bare object keys like: speaker_name: "..."
+    normalized = re.sub(r'([\{\[\n,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:', r'\1"\2":', normalized)
+    # Convert single-quoted strings to double quotes where safe.
+    normalized = re.sub(r"'([^'\\]*(?:\\.[^'\\]*)*)'", r'"\1"', normalized)
+    # Remove stray markdown list prefixes like '- ' inside JSON-like blocks.
+    normalized = re.sub(r"^[-*+]\s+", "", normalized, flags=re.MULTILINE)
+    # Insert commas between lines if the newline separates two key/value entries.
+    normalized = re.sub(
+        r'(["\]0-9\}\S])\s*\n\s*([A-Za-z_][A-Za-z0-9_]*\s*:)',
+        r'\1,\n\2',
+        normalized,
+    )
+    normalized = re.sub(
+        r'(["\]0-9\}\S])\s*\n\s*("[A-Za-z_][A-Za-z0-9_]*"\s*:)',
+        r'\1,\n\2',
+        normalized,
+    )
+    # Wrap plain key/value residues in braces to make them valid JSON.
+    stripped = normalized.strip()
+    if stripped and not stripped.startswith(('{', '[')):
+        stripped = stripped.rstrip(',')
+        normalized = f"{{{stripped}}}"
+    # Remove any Unicode ellipsis or invalid punctuation near keys/values.
+    normalized = normalized.replace('…', '...')
+    return normalized
+
+
+def _is_top_level_start(text: str, idx: int) -> bool:
+    stack = []
+    for ch in text[:idx]:
+        if ch in "[{":
+            stack.append(ch)
+        elif ch == "}" and stack and stack[-1] == "{":
+            stack.pop()
+        elif ch == "]" and stack and stack[-1] == "[":
+            stack.pop()
+    return len(stack) == 0
 
 
 def _extract_json(text: str) -> dict | list:
     """Strip markdown fences, then parse the first complete JSON value found."""
-    clean = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
-    # raw_decode stops after the first valid JSON value — ignores any trailing text
+    clean = _clean_json_text(text)
     decoder = json.JSONDecoder()
     for start_char in ('{', '['):
         idx = clean.find(start_char)
-        if idx != -1:
-            try:
-                obj, _ = decoder.raw_decode(clean, idx)
-                return obj
-            except json.JSONDecodeError:
-                continue
+        while idx != -1:
+            if _is_top_level_start(clean, idx):
+                try:
+                    obj, _ = decoder.raw_decode(clean, idx)
+                    return obj
+                except json.JSONDecodeError:
+                    pass
+            idx = clean.find(start_char, idx + 1)
+
+    # Try a tolerant JSON5 parser if available.
+    if importlib.util.find_spec("json5") is not None:
+        try:
+            import json5
+            return json5.loads(clean)
+        except Exception:
+            pass
+
+    normalized = _normalize_json_like(clean)
+    if normalized != clean:
+        try:
+            if importlib.util.find_spec("json5") is not None:
+                import json5
+                return json5.loads(normalized)
+            return json.loads(normalized)
+        except Exception:
+            pass
+
     # Log what Claude actually returned to help diagnose failures
     preview = clean[:300].replace("\n", "\\n")
     print(f"[claude] _extract_json failed — raw preview: {preview!r}")
     return json.loads(clean)  # raises with original error
+
+
+def _extract_tagged_section(text: str, tag: str) -> str:
+    match = re.search(rf"<{tag}>\s*(.*?)\s*</{tag}>", text, flags=re.DOTALL | re.IGNORECASE)
+    if not match:
+        raise ValueError(f"Missing <{tag}> section")
+    return match.group(1).strip()
 
 
 def extract_metadata(transcript: list[dict]) -> dict:
@@ -93,37 +188,77 @@ def generate_posts(transcript: list[dict]) -> dict:
     prompt = f"""{SCALER_CONTEXT}
 
 Based on this podcast/session transcript from Scaler's YouTube channel, create content for three platforms.
+The posts will be published on Scaler's channels, so write from Scaler's perspective.
+Keep everything tight, clear, and promotional without sounding like an ad.
 
 TRANSCRIPT:
 {full_text}
 
 ---
-Create the following and return as valid JSON (no markdown code blocks):
+Create the following and return ONLY these two tagged sections in this exact format:
 
-1. "twitter": A viral Twitter/X thread posted by @scaler_official. 6-8 tweets.
-   - First tweet: punchy hook that highlights the most surprising/inspiring insight
-   - Middle tweets: key lessons, story beats, surprising facts from the talk
-   - Last tweet: soft CTA ("Full podcast on our YouTube ↓ Link in bio") + 2-3 relevant hashtags
+<TWITTER>
+...
+</TWITTER>
+<BLOG>
+...
+</BLOG>
+
+1. TWITTER: A Twitter/X thread posted by @scaler_official. 4-6 tweets only.
+   - First tweet: punchy hook around the strongest insight
+   - Middle tweets: only the sharpest lessons or story beats
+   - Last tweet: soft CTA to watch the full video on Scaler's YouTube + 2-3 relevant hashtags
    - Separate tweets with "|||". Each tweet max 280 chars.
-   - Write as Scaler sharing the speaker's story/insights, not as the speaker themselves
+   - Write as Scaler sharing the speaker's insights, not as the speaker
+   - Make it feel useful for Scaler's audience and favorable to Scaler's brand
 
-2. "linkedin": A LinkedIn post by Scaler (250-400 words).
-   - Open with a powerful moment or quote from the talk
-   - Tell the speaker's story with context (who they are, why Scaler had them on)
-   - 3-4 bullet point takeaways from the session
-   - Close with what this means for Scaler's community + a question to drive comments
-   - Mention "Full podcast on our YouTube channel" naturally at the end
+2. BLOG: A concise blog post in Markdown (450-650 words).
+   - H1 title framed from Scaler's perspective
+   - Intro: why this conversation matters for Scaler's audience
+   - 3 short H2 sections covering the best insights only
+   - Conclusion: practical takeaway + CTA to watch the full video on Scaler's YouTube
+   - Keep it crisp, readable, and not bloated
 
-3. "blog": A full blog post in Markdown (900-1200 words) published on Scaler's blog.
-   - H1 title that frames it from Scaler's perspective (e.g. "What [Speaker] Taught Our Community About...")
-   - Intro: why Scaler invited this speaker / what makes their story relevant to tech careers
-   - 3-4 H2 sections covering the key insights from the session
-   - Conclusion: what Scaler's students/community can take away + link to watch the full video
+Do not return JSON. Do not add any explanation outside the two tags."""
 
-Return only valid JSON: {{"twitter": "...", "linkedin": "...", "blog": "..."}}"""
+    linkedin_prompt = f"""Use the transcript below to write an SST-style LinkedIn post.
+Choose the best post type from the skill and follow it exactly.
+Ground all claims in the transcript. Do not invent names, companies, amounts, locations, or outcomes.
+If some SST-specific detail is not present in the transcript, do not fabricate it.
 
-    raw = _chat(prompt, max_tokens=4096)
-    return _extract_json(raw)
+TRANSCRIPT:
+{full_text}"""
+
+    raw = ""
+    try:
+        raw = _chat(prompt, max_tokens=4096)
+        parsed = {
+            "twitter": _extract_tagged_section(raw, "TWITTER"),
+            "blog": _extract_tagged_section(raw, "BLOG"),
+        }
+        parsed["linkedin"] = _chat(
+            linkedin_prompt,
+            max_tokens=1400,
+            system=LINKEDIN_SKILL,
+        ).strip()
+        return parsed
+    except Exception as exc:
+        print(f"[claude] tagged generate_posts parse failed: {exc}")
+        try:
+            parsed = _extract_json(raw)
+            linkedin = _chat(
+                linkedin_prompt,
+                max_tokens=1400,
+                system=LINKEDIN_SKILL,
+            ).strip()
+            return {
+                "twitter": parsed.get("twitter", ""),
+                "linkedin": linkedin or parsed.get("linkedin", ""),
+                "blog": parsed.get("blog", ""),
+            }
+        except Exception as json_exc:
+            print(f"[claude] generate_posts failed: {json_exc}")
+            return {"twitter": "", "linkedin": "", "blog": ""}
 
 
 def design_shorts(transcript: list[dict], max_shorts: int = 3) -> list[dict]:
@@ -152,9 +287,11 @@ You are a YouTube Shorts editor working for Scaler. You have the full timestampe
 
 Design exactly {max_shorts} YouTube Shorts that are:
 - Self-contained and fully understandable without watching the full video
-- Under 90 seconds total duration each
-- Built from the BEST moments — you can pull multiple non-consecutive clips from anywhere
-  in the video and stitch them together into one coherent short
+- Built around one complete topic, story beat, or answer from the original video
+- Under 75 seconds total duration each
+- Prefer one continuous segment from the original video whenever possible
+- Do not crop a thought midway; if the speaker starts explaining a topic, let that topic reach
+  a natural end before choosing the end timestamp
 - Always starting AND ending on a complete sentence boundary (use the exact [MM:SS] timestamps)
 - Focused on a single clear insight, story beat, or takeaway that resonates with ambitious
   engineers and students following Scaler
@@ -166,9 +303,13 @@ TRANSCRIPT:
 Rules for segments:
 - start_ms and end_ms must match actual sentence boundaries from the transcript above
   (convert [MM:SS] → milliseconds: MM*60000 + SS*1000)
+- Each short should usually contain exactly 1 segment; use multiple segments only if they are
+  adjacent parts of the same thought and still feel like one complete explanation
 - Multiple segments must be in chronological order and non-overlapping
-- Total duration of all segments combined must be ≤ 90 seconds
+- Total duration of all segments combined must be ≤ 75 seconds
 - Minimum 25 seconds total
+- Never end on a teaser, cliffhanger, or unfinished explanation
+- The viewer should feel they got the full point even without the full video
 
 Return a JSON array of exactly {max_shorts} objects. No markdown, just the array:
 [{{
@@ -182,10 +323,10 @@ Return a JSON array of exactly {max_shorts} objects. No markdown, just the array
     try:
         raw = _chat(prompt, max_tokens=2048).strip()
         raw = re.sub(r"```(?:json)?\s*", "", raw).replace("```", "").strip()
-        designs = json.loads(raw)
+        designs = _extract_json(raw)
         valid = []
         for d in designs:
-            if "segments" not in d or "title" not in d:
+            if not isinstance(d, dict) or "segments" not in d or "title" not in d:
                 continue
             # Coerce to int and compute total duration
             total_ms = 0

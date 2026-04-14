@@ -15,10 +15,15 @@ services:
       - web
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+        INTERNAL_API_URL: ${INTERNAL_API_URL:-http://backend:8000}
     restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_API_URL=https://${DOMAIN}/api
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api}
+      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://backend:8000}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)"

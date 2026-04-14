@@ -11,10 +11,14 @@ services:
     build:
       context: ./frontend
       target: dev
+      args:
+        NEXT_PUBLIC_API_URL: /api
+        INTERNAL_API_URL: http://backend:8000
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://100.129.165.51:8000/api
+      - NEXT_PUBLIC_API_URL=/api
+      - INTERNAL_API_URL=http://backend:8000
     labels: []
     volumes:
       - ./frontend:/app
