@@ -19,7 +19,10 @@ export async function uploadVideo(file: File): Promise<string> {
     },
     body: file,
   });
-  if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Upload failed (${res.status}): ${body}`);
+  }
   const { upload_url } = await res.json();
   return upload_url as string;
 }
@@ -28,7 +31,7 @@ export async function transcribeVideo(
   uploadUrl: string,
   onProgress: (label: string, pct: number) => void
 ): Promise<Sentence[]> {
-  const headers = {
+  const authHeaders = {
     Authorization: key(),
     "Content-Type": "application/json",
   };
@@ -36,7 +39,7 @@ export async function transcribeVideo(
   // Create transcript job
   const createRes = await fetch(`${BASE}/v2/transcript`, {
     method: "POST",
-    headers,
+    headers: authHeaders,
     body: JSON.stringify({
       audio_url: uploadUrl,
       punctuate: true,
@@ -44,7 +47,12 @@ export async function transcribeVideo(
       language_detection: true,
     }),
   });
-  if (!createRes.ok) throw new Error("Failed to start transcription");
+  if (!createRes.ok) {
+    const body = await createRes.json().catch(() => ({}));
+    throw new Error(
+      `Transcription start failed (${createRes.status}): ${body?.error ?? body?.message ?? JSON.stringify(body)}`
+    );
+  }
   const { id } = await createRes.json();
 
   // Poll until complete
@@ -58,22 +66,65 @@ export async function transcribeVideo(
     const data = await pollRes.json();
 
     if (data.status === "error") {
-      throw new Error(data.error ?? "Transcription failed");
+      throw new Error(`Transcription failed: ${data.error ?? "unknown error"}`);
     }
+
     if (data.status === "completed") {
       onProgress("Transcription complete", 40);
-      // Fetch sentence-level timestamps
+
+      // Get sentence-level timestamps
       const sentRes = await fetch(`${BASE}/v2/transcript/${id}/sentences`, {
         headers: { Authorization: key() },
       });
-      const { sentences } = await sentRes.json();
-      return (sentences as { text: string; start: number; end: number }[]).map(
-        (s) => ({ text: s.text, start_ms: s.start, end_ms: s.end })
-      );
+      const sentData = await sentRes.json();
+
+      // sentences lives at sentData.sentences
+      const raw: { text: string; start: number; end: number }[] =
+        sentData.sentences ?? [];
+
+      if (!raw.length) {
+        // Fall back to words-grouped-by-utterance if sentences endpoint is empty
+        return wordsToSentences(data.words ?? []);
+      }
+
+      return raw.map((s) => ({
+        text: s.text,
+        start_ms: s.start,
+        end_ms: s.end,
+      }));
     }
+
     onProgress(
       "Transcribing audio…",
       data.status === "processing" ? 25 : 15
     );
   }
+}
+
+// Fallback: group words into rough sentences on punctuation boundaries
+function wordsToSentences(
+  words: { text: string; start: number; end: number }[]
+): Sentence[] {
+  const sentences: Sentence[] = [];
+  let buf: typeof words = [];
+
+  for (const w of words) {
+    buf.push(w);
+    if (/[.!?]$/.test(w.text) || buf.length >= 20) {
+      sentences.push({
+        text: buf.map((x) => x.text).join(" "),
+        start_ms: buf[0].start,
+        end_ms: buf[buf.length - 1].end,
+      });
+      buf = [];
+    }
+  }
+  if (buf.length) {
+    sentences.push({
+      text: buf.map((x) => x.text).join(" "),
+      start_ms: buf[0].start,
+      end_ms: buf[buf.length - 1].end,
+    });
+  }
+  return sentences;
 }
