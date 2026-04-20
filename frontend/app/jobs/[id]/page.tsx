@@ -24,7 +24,8 @@ export interface JobData {
     hook_text: string;
     score: number;
     duration_s: number;
-    url: string;
+    rationale: string;
+    segments: { start_ms: number; end_ms: number }[];
   }[] | null;
   error: string | null;
 }
