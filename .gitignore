@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Storage (video files, never commit)
+storage/uploads/
+storage/shorts/
+storage/tmp/
+
+# Frontend build
+.next/
+node_modules/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
