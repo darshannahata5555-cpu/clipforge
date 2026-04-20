@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api",
-  },
+  output: "export",       // static export for Netlify
+  trailingSlash: true,    // Netlify serves index.html from directories
 };
 
 module.exports = nextConfig;
