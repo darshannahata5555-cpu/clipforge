@@ -1,7 +1,6 @@
 import os
 import uuid
 import tempfile
-from celery import Celery
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -9,14 +8,6 @@ from database import SessionLocal
 from models import Job
 from services import assemblyai_service, claude_service
 from services.storage import storage
-
-celery_app = Celery(
-    "pipeline",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
-)
-celery_app.conf.task_serializer = "json"
-celery_app.conf.result_serializer = "json"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -43,10 +34,9 @@ def _get_local_video(job: Job) -> tuple[str, bool]:
     return storage.local_path(job.video_path), False
 
 
-# ── Main task ─────────────────────────────────────────────────────────────────
+# ── Main pipeline function (runs as FastAPI background task) ──────────────────
 
-@celery_app.task(bind=True, max_retries=0)
-def process_video(self, job_id: str):
+def process_video(job_id: str):
     db = SessionLocal()
     tmp_video = None
 

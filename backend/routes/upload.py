@@ -1,6 +1,6 @@
 import uuid
 import os
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -19,6 +19,7 @@ ALLOWED_TYPES = {
 
 @router.post("/upload")
 async def upload_video(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
@@ -56,7 +57,7 @@ async def upload_video(
     db.add(job)
     db.commit()
 
-    # Enqueue background task
-    process_video.delay(job_id)
+    # Run pipeline as a background task (same process, no Redis/Celery needed)
+    background_tasks.add_task(process_video, job_id)
 
     return {"job_id": job_id}
