@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 # This overrides production config for local development.
 
